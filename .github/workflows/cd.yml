@@ -8,7 +8,7 @@ name: "CD - Build and Deploy to EC2"
 
 on:
   push:
-    branches: [prod/master_no_k8s]
+    branches: ['**']
   workflow_dispatch:
     inputs:
       deploy:
