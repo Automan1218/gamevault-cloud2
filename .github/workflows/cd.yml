@@ -10,6 +10,15 @@ on:
   push:
     branches: [prod/master_no_k8s]
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: '是否部署到EC2'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 env:
   DOCKER_REGISTRY: docker.io

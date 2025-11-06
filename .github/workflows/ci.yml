@@ -11,6 +11,18 @@ on:
     branches: [prod/master_no_k8s]
   pull_request:
     branches: [prod/master_no_k8s]
+  workflow_dispatch: # 允许手动触发
+    inputs:
+      deploy:
+        description: '是否部署到EC2'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+
 
 env:
   JAVA_VERSION: '17'
