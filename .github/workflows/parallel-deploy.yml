@@ -4,11 +4,17 @@ name: "Parallel Deploy - All Services"
 # 类似K8S的多管道部署方式
 
 on:
+  # ✅ 添加 push 触发器 - 推送到指定分支时自动触发
   push:
     branches:
       - prod/master_no_k8s
       - main
       - master
+    # 可选：只在特定路径变更时触发
+    # paths:
+    #   - 'gamevault-*/**'
+    #   - '.github/workflows/parallel-deploy.yml'
+
   # ✅ 保留手动触发器 - 可以手动选择要部署的服务
   workflow_dispatch:
     inputs:
@@ -31,10 +37,10 @@ env:
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-  # ==================== Job 1: 准备工作 - 构建Common模块 ====================
+  # ==================== Job 1: 准备工作 - 安装父POM和Common模块 ====================
   prepare-common:
     runs-on: ubuntu-latest
-    name: Prepare Common Module
+    name: Prepare Parent POM and Common Module
 
     steps:
       - name: Checkout code
@@ -47,6 +53,13 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Install Parent POM
+        run: |
+          echo "📦 Installing parent POM (gamevault-cloud)..."
+          # 只安装父 POM，不构建子模块
+          mvn install -N -DskipTests -B
+          echo "✅ Parent POM installed"
+
       - name: Build and Install Common Module
         run: |
           if [ -d "gamevault-common" ]; then
@@ -55,8 +68,14 @@ jobs:
             mvn clean install -DskipTests -B
             echo "✅ Common module installed"
           else
-            echo "⚠️  No common module found"
+            echo "⚠️  No common module found, skipping..."
           fi
+
+      - name: Verify Installation
+        run: |
+          echo "🔍 Verifying installed artifacts..."
+          ls -la ~/.m2/repository/com/sg/nusiss/gamevault-cloud/ || echo "Parent POM not found"
+          ls -la ~/.m2/repository/com/sg/nusiss/gamevault-common/ || echo "Common module not found"
 
       - name: Cache Maven Repository
         uses: actions/cache/save@v3
