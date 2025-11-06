@@ -7,7 +7,7 @@ on:
       - 'gamevault-gateway/**'
       - 'gamevault-common/**'
       - 'pom.xml'
-      - '.github/workflows/cicd-gateway-v2.yml'
+      - '.github/workflows/cicd-gateway.yml'
   pull_request:
     branches: ['prod/master_no_k8s']
     paths:

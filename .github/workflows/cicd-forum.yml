@@ -7,7 +7,7 @@ on:
       - 'gamevault-forum/**'
       - 'gamevault-common/**'
       - 'pom.xml'
-      - '.github/workflows/cicd-forum-v2.yml'
+      - '.github/workflows/cicd-forum.yml'
   pull_request:
     branches: ['prod/master_no_k8s']
     paths:

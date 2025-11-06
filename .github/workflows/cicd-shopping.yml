@@ -7,7 +7,7 @@ on:
       - 'gamevault-shopping/**'
       - 'gamevault-common/**'
       - 'pom.xml'
-      - '.github/workflows/cicd-shopping-v2.yml'
+      - '.github/workflows/cicd-shopping.yml'
   pull_request:
     branches: ['prod/master_no_k8s']
     paths:

@@ -7,7 +7,7 @@ on:
       - 'gamevault-social/**'
       - 'gamevault-common/**'
       - 'pom.xml'
-      - '.github/workflows/cicd-social-v2.yml'
+      - '.github/workflows/cicd-social.yml'
   pull_request:
     branches: ['prod/master_no_k8s']
     paths:
