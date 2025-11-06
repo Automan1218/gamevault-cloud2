@@ -47,7 +47,7 @@ jobs:
             echo "📦 Building gamevault-common module..."
             cd gamevault-common
             mvn clean install -DskipTests -B
-            echo "✅ Common module installed"
+            echo "Common module installed"
           else
             echo "⚠️  No common module found"
           fi
