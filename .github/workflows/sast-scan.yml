@@ -59,7 +59,16 @@ jobs:
           restore-keys: ${{ runner.os }}-m2
 
       - name: Install dependencies
-        run: mvn dependency:go-offline -B
+        run: |
+          echo "📦 Building common module first..."
+          # 先构建并安装 common 模块到本地仓库
+          if [ -d "gamevault-common" ]; then
+            cd gamevault-common
+            mvn clean install -DskipTests -B
+            cd ..
+          fi
+          # 再构建整个项目
+          mvn dependency:go-offline -B
 
       - name: Run Checkstyle
         run: |
@@ -127,7 +136,7 @@ jobs:
   dependency-check:
     name: OWASP Dependency Check
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -267,7 +276,15 @@ jobs:
           cache: 'maven'
 
       - name: Build with Maven
-        run: mvn clean compile -B -DskipTests
+        run: |
+          # 先构建 common 模块
+          if [ -d "gamevault-common" ]; then
+            cd gamevault-common
+            mvn clean install -DskipTests -B
+            cd ..
+          fi
+          # 再构建整个项目
+          mvn clean compile -B -DskipTests
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
