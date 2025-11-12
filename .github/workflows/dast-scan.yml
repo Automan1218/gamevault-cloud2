@@ -1,0 +1,436 @@
+# ==========================================
+# DAST Security Scan Workflow
+# 动态应用安全测试 - 对运行中的应用进行安全扫描
+# 适用于 GameVault 微服务架构
+# ==========================================
+
+name: "DAST - Dynamic Security Scan"
+
+on:
+  workflow_run:
+    workflows: ["CD - Build and Deploy to EC2"]
+    types: [completed]
+    branches: [prod/master_no_k8s]
+  schedule:
+    # 每天凌晨 3 点自动扫描
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: '扫描目标环境'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - 'production'
+          - 'staging'
+          - 'dev'
+      scan_type:
+        description: '扫描类型'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - 'quick'    # 快速扫描 (~15分钟)
+          - 'full'     # 完整扫描 (~2小时)
+          - 'api-only' # 仅 API 扫描
+
+env:
+  # EC2 公网 IP
+  TARGET_HOST: ${{ secrets.EC2_PUBLIC_IP || '3.0.15.128' }}
+  # 服务端口映射
+  GATEWAY_PORT: 8080
+  AUTH_PORT: 8081
+  SHOPPING_PORT: 8082
+  FORUM_PORT: 8083
+  DEVELOPER_PORT: 8084
+  SOCIAL_PORT: 8089
+
+jobs:
+  # ==========================================
+  # Job 1: 环境健康检查
+  # ==========================================
+  health-check:
+    name: Environment Health Check
+    runs-on: ubuntu-latest
+    outputs:
+      services_healthy: ${{ steps.check.outputs.healthy }}
+    
+    steps:
+      - name: Check services availability
+        id: check
+        run: |
+          echo "🏥 Checking services health..."
+          
+          SERVICES=(
+            "Gateway:${{ env.TARGET_HOST }}:${{ env.GATEWAY_PORT }}"
+            "Auth:${{ env.TARGET_HOST }}:${{ env.AUTH_PORT }}"
+            "Shopping:${{ env.TARGET_HOST }}:${{ env.SHOPPING_PORT }}"
+            "Forum:${{ env.TARGET_HOST }}:${{ env.FORUM_PORT }}"
+            "Developer:${{ env.TARGET_HOST }}:${{ env.DEVELOPER_PORT }}"
+            "Social:${{ env.TARGET_HOST }}:${{ env.SOCIAL_PORT }}"
+          )
+          
+          HEALTHY=true
+          echo "| Service | Status | Response Time |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|---------------|" >> $GITHUB_STEP_SUMMARY
+          
+          for service in "${SERVICES[@]}"; do
+            IFS=':' read -r name host port <<< "$service"
+          
+            START=$(date +%s%3N)
+            if curl -sf -m 10 "http://${host}:${port}/actuator/health" > /dev/null 2>&1; then
+              END=$(date +%s%3N)
+              ELAPSED=$((END - START))
+              echo "| $name | ✅ Healthy | ${ELAPSED}ms |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $name | ❌ Unhealthy | - |" >> $GITHUB_STEP_SUMMARY
+              HEALTHY=false
+            fi
+          done
+          
+          echo "healthy=$HEALTHY" >> $GITHUB_OUTPUT
+
+      - name: Fail if services unhealthy
+        if: steps.check.outputs.healthy != 'true'
+        run: |
+          echo "❌ Some services are unhealthy. Cannot proceed with DAST scan."
+          exit 1
+
+  # ==========================================
+  # Job 2: OWASP ZAP 主动扫描
+  # ==========================================
+  zap-scan:
+    name: OWASP ZAP Security Scan
+    runs-on: ubuntu-latest
+    needs: health-check
+    
+    strategy:
+      matrix:
+        service:
+          - name: gateway
+            url: http://${{ env.TARGET_HOST }}:${{ env.GATEWAY_PORT }}
+            context: api
+          - name: auth
+            url: http://${{ env.TARGET_HOST }}:${{ env.AUTH_PORT }}
+            context: api/auth
+          - name: shopping
+            url: http://${{ env.TARGET_HOST }}:${{ env.SHOPPING_PORT }}
+            context: api/games
+          - name: forum
+            url: http://${{ env.TARGET_HOST }}:${{ env.FORUM_PORT }}
+            context: api/forum
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create ZAP rules file
+        run: |
+          mkdir -p zap-configs
+          cat > zap-configs/rules.tsv << 'EOF'
+          # ZAP Scan Rules
+          # Format: ID	THRESHOLD	STRENGTH
+          10021	MEDIUM	MEDIUM	# X-Content-Type-Options
+          10020	MEDIUM	MEDIUM	# X-Frame-Options
+          10038	MEDIUM	MEDIUM	# Content Security Policy
+          10096	MEDIUM	MEDIUM	# Timestamp Disclosure
+          EOF
+
+      - name: Run ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: ${{ matrix.service.url }}/${{ matrix.service.context }}
+          rules_file_name: 'zap-configs/rules.tsv'
+          cmd_options: '-a -j -l INFO'
+          fail_action: false
+          allow_issue_writing: false
+
+      - name: Run ZAP Full Scan
+        if: github.event.inputs.scan_type == 'full' || github.event_name == 'schedule'
+        uses: zaproxy/action-full-scan@v0.8.0
+        with:
+          target: ${{ matrix.service.url }}/${{ matrix.service.context }}
+          rules_file_name: 'zap-configs/rules.tsv'
+          cmd_options: '-a -j -l INFO'
+          fail_action: false
+
+      - name: Upload ZAP Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report-${{ matrix.service.name }}
+          path: |
+            report_html.html
+            report_md.md
+            report_json.json
+          retention-days: 30
+
+  # ==========================================
+  # Job 3: API 安全测试
+  # ==========================================
+  api-security-test:
+    name: API Security Testing
+    runs-on: ubuntu-latest
+    needs: health-check
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Newman (Postman CLI)
+        run: npm install -g newman newman-reporter-htmlextra
+
+      - name: Create API Security Test Collection
+        run: |
+          mkdir -p api-tests
+          cat > api-tests/security-tests.json << 'EOF'
+          {
+            "info": {
+              "name": "GameVault API Security Tests",
+              "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+            },
+            "item": [
+              {
+                "name": "SQL Injection Tests",
+                "item": [
+                  {
+                    "name": "Test SQL Injection in Query Params",
+                    "request": {
+                      "method": "GET",
+                      "header": [],
+                      "url": {
+                        "raw": "http://${{ env.TARGET_HOST }}:${{ env.GATEWAY_PORT }}/api/games?search=' OR '1'='1",
+                        "host": ["${{ env.TARGET_HOST }}"],
+                        "port": "${{ env.GATEWAY_PORT }}",
+                        "path": ["api", "games"],
+                        "query": [
+                          {
+                            "key": "search",
+                            "value": "' OR '1'='1"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "XSS Tests",
+                "item": [
+                  {
+                    "name": "Test XSS in Search",
+                    "request": {
+                      "method": "GET",
+                      "header": [],
+                      "url": {
+                        "raw": "http://${{ env.TARGET_HOST }}:${{ env.GATEWAY_PORT }}/api/games?search=<script>alert('XSS')</script>",
+                        "host": ["${{ env.TARGET_HOST }}"],
+                        "port": "${{ env.GATEWAY_PORT }}",
+                        "path": ["api", "games"],
+                        "query": [
+                          {
+                            "key": "search",
+                            "value": "<script>alert('XSS')</script>"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "Authentication Tests",
+                "item": [
+                  {
+                    "name": "Test Unauthorized Access",
+                    "request": {
+                      "method": "GET",
+                      "header": [],
+                      "url": {
+                        "raw": "http://${{ env.TARGET_HOST }}:${{ env.GATEWAY_PORT }}/api/orders",
+                        "host": ["${{ env.TARGET_HOST }}"],
+                        "port": "${{ env.GATEWAY_PORT }}",
+                        "path": ["api", "orders"]
+                      }
+                    },
+                    "event": [
+                      {
+                        "listen": "test",
+                        "script": {
+                          "exec": [
+                            "pm.test('Should return 401 for unauthorized access', function() {",
+                            "    pm.response.to.have.status(401);",
+                            "});"
+                          ],
+                          "type": "text/javascript"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+      - name: Run API Security Tests
+        run: |
+          newman run api-tests/security-tests.json \
+            --reporters cli,htmlextra \
+            --reporter-htmlextra-export api-security-report.html \
+            --bail || true
+        continue-on-error: true
+
+      - name: Upload API Security Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-security-test-report
+          path: api-security-report.html
+          retention-days: 30
+
+  # ==========================================
+  # Job 4: SSL/TLS 安全检查
+  # ==========================================
+  ssl-tls-check:
+    name: SSL/TLS Security Check
+    runs-on: ubuntu-latest
+    needs: health-check
+    if: github.event.inputs.target_environment == 'production'
+    
+    steps:
+      - name: Install testssl.sh
+        run: |
+          git clone --depth 1 https://github.com/drwetter/testssl.sh.git
+          cd testssl.sh
+
+      - name: Run SSL/TLS Scan
+        run: |
+          cd testssl.sh
+          ./testssl.sh \
+            --severity MEDIUM \
+            --htmlfile ../ssl-report.html \
+            --jsonfile ../ssl-report.json \
+            ${{ env.TARGET_HOST }}:${{ env.GATEWAY_PORT }} || true
+        continue-on-error: true
+
+      - name: Upload SSL Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssl-tls-report
+          path: |
+            ssl-report.html
+            ssl-report.json
+          retention-days: 30
+
+  # ==========================================
+  # Job 5: 安全头检查
+  # ==========================================
+  security-headers-check:
+    name: Security Headers Check
+    runs-on: ubuntu-latest
+    needs: health-check
+    
+    steps:
+      - name: Check Security Headers
+        run: |
+          echo "🔍 Checking Security Headers..."
+          
+          SERVICES=(
+            "Gateway:http://${{ env.TARGET_HOST }}:${{ env.GATEWAY_PORT }}"
+            "Auth:http://${{ env.TARGET_HOST }}:${{ env.AUTH_PORT }}"
+          )
+          
+          echo "## 🔒 Security Headers Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for service in "${SERVICES[@]}"; do
+            IFS=':' read -r name url <<< "$service"
+          
+            echo "### $name Service" >> $GITHUB_STEP_SUMMARY
+            echo "| Header | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          
+            # Check important security headers
+            HEADERS=(
+              "X-Content-Type-Options"
+              "X-Frame-Options"
+              "X-XSS-Protection"
+              "Strict-Transport-Security"
+              "Content-Security-Policy"
+              "Referrer-Policy"
+            )
+          
+            for header in "${HEADERS[@]}"; do
+              if curl -sI "${url}/actuator/health" | grep -i "^${header}:" > /dev/null; then
+                VALUE=$(curl -sI "${url}/actuator/health" | grep -i "^${header}:" | cut -d: -f2- | tr -d '\r\n')
+                echo "| $header | ✅ ${VALUE} |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| $header | ❌ Missing |" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+
+  # ==========================================
+  # Job 6: DAST 扫描汇总报告
+  # ==========================================
+  dast-summary:
+    name: DAST Scan Summary
+    runs-on: ubuntu-latest
+    needs: [zap-scan, api-security-test, security-headers-check]
+    if: always()
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: scan-reports
+
+      - name: Generate DAST Summary Report
+        run: |
+          echo "# 🔐 DAST Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Environment:** ${{ github.event.inputs.target_environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Type:** ${{ github.event.inputs.scan_type || 'full' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 扫描完成情况" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 扫描项目 | 状态 |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ZAP Scan | ${{ needs.zap-scan.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| API Security Test | ${{ needs.api-security-test.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Headers | ${{ needs.security-headers-check.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "📊 详细报告请查看: [Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create consolidated report
+        run: |
+          mkdir -p consolidated-report
+          echo "<html><head><title>DAST Security Report</title></head><body>" > consolidated-report/index.html
+          echo "<h1>GameVault DAST Security Scan Report</h1>" >> consolidated-report/index.html
+          echo "<p>Scan Date: $(date)</p>" >> consolidated-report/index.html
+          
+          # List all reports
+          find scan-reports -type f -name "*.html" -exec echo "<a href='{}'>Report: {}</a><br>" \; >> consolidated-report/index.html
+          
+          echo "</body></html>" >> consolidated-report/index.html
+
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-consolidated-report
+          path: consolidated-report/
+          retention-days: 90
+
+      - name: Notify on critical findings
+        if: needs.zap-scan.result == 'failure'
+        run: |
+          echo "⚠️ Critical security vulnerabilities detected in DAST scan!"
+          echo "Please review the ZAP scan reports immediately."
