@@ -7,6 +7,24 @@
 name: "DAST - Dynamic Security Scan"
 
 on:
+  workflow_call:  # 必须放在最前面！
+    inputs:
+      target_environment:
+        description: '扫描目标环境'
+        required: false
+        default: 'production'
+        type: string
+      scan_type:
+        description: '扫描类型'
+        required: false
+        default: 'full'
+        type: string
+  push:
+    branches: [prod/master_no_k8s, main]  # 添加 push 触发，让它显示在列表中
+    paths-ignore:  # 但是忽略大部分变更
+      - '**.md'
+      - 'docs/**'
+      - '.github/**'
   workflow_run:
     workflows: ["CD - Build and Deploy to EC2"]
     types: [completed]
@@ -34,18 +52,6 @@ on:
           - 'quick'    # 快速扫描 (~15分钟)
           - 'full'     # 完整扫描 (~2小时)
           - 'api-only' # 仅 API 扫描
-  workflow_call:  # 允许被其他 workflow 调用
-    inputs:
-      target_environment:
-        description: '扫描目标环境'
-        required: false
-        default: 'production'
-        type: string
-      scan_type:
-        description: '扫描类型'
-        required: false
-        default: 'full'
-        type: string
 
 permissions:
   contents: read
