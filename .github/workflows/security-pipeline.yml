@@ -87,7 +87,7 @@ jobs:
     name: Run SAST Scan
     needs: pre-check
     if: needs.pre-check.outputs.should_run_sast == 'true'
-    uses: ./.github/workflows/enhanced-sast-scan.yml
+    uses: ./.github/workflows/sast-scan.yml
     secrets: inherit
 
   # ==========================================
@@ -100,7 +100,7 @@ jobs:
       always() && 
       needs.pre-check.outputs.should_run_container == 'true' &&
       (needs.sast-scan.result == 'success' || needs.sast-scan.result == 'skipped')
-    uses: ./.github/workflows/enhanced-container-scan.yml
+    uses: ./.github/workflows/container-scan.yml
     secrets: inherit
 
   # ==========================================
