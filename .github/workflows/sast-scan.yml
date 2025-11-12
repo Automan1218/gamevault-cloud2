@@ -25,6 +25,19 @@ on:
           - 'quick'    # 快速扫描
           - 'full'     # 完整扫描
           - 'critical' # 仅关键漏洞
+  workflow_call: # 允许被其他 workflow 调用
+    inputs:
+      scan_level:
+        description: '扫描级别'
+        required: false
+        default: 'full'
+        type: string
+
+permissions:
+   contents: read
+   security-events: write
+   actions: read
+   pull-requests: write
 
 env:
   JAVA_VERSION: '17'

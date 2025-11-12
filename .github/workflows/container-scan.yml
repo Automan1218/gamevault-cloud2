@@ -21,11 +21,19 @@ on:
         required: true
         default: 'true'
         type: boolean
+  workflow_call:  # 允许被其他 workflow 调用
+    inputs:
+      scan_all_services:
+        description: '是否扫描所有服务'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
   security-events: write
   packages: write
+  actions: read
 
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -38,7 +46,7 @@ jobs:
   build-images:
     name: Build Docker Images for Scanning
     runs-on: ubuntu-latest
-    
+
     strategy:
       fail-fast: false
       matrix:
@@ -49,7 +57,7 @@ jobs:
           - gamevault-forum
           - gamevault-developer
           - gamevault-social
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

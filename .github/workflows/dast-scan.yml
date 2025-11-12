@@ -34,10 +34,27 @@ on:
           - 'quick'    # 快速扫描 (~15分钟)
           - 'full'     # 完整扫描 (~2小时)
           - 'api-only' # 仅 API 扫描
+  workflow_call:  # 允许被其他 workflow 调用
+    inputs:
+      target_environment:
+        description: '扫描目标环境'
+        required: false
+        default: 'production'
+        type: string
+      scan_type:
+        description: '扫描类型'
+        required: false
+        default: 'full'
+        type: string
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
 
 env:
   # EC2 公网 IP
-  TARGET_HOST: ${{ secrets.EC2_PUBLIC_IP || '3.0.15.128' }}
+  TARGET_HOST: ${{ secrets.EC2_PUBLIC_IP || '52.77.169.8' }}
   # 服务端口映射
   GATEWAY_PORT: 8080
   AUTH_PORT: 8081
@@ -109,16 +126,16 @@ jobs:
       matrix:
         service:
           - name: gateway
-            url: http://3.0.15.128:8080
+            url: http://52.77.169.8:8080
             context: api
           - name: auth
-            url: http://3.0.15.128:8081
+            url: http://52.77.169.8:8081
             context: api/auth
           - name: shopping
-            url: http://3.0.15.128:8082
+            url: http://52.77.169.8:8082
             context: api/games
           - name: forum
-            url: http://3.0.15.128:8083
+            url: http://52.77.169.8:8083
             context: api/forum
 
     steps:
