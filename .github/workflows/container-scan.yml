@@ -29,11 +29,12 @@ on:
         default: 'true'
         type: boolean
 
-permissions:
-  contents: read
-  security-events: write
-  packages: write
-  actions: read
+# permissions 由调用方（主管道）提供
+# permissions:
+#   contents: read
+#   security-events: write
+#   packages: write
+#   actions: read
 
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}

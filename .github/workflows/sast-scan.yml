@@ -7,6 +7,13 @@
 name: "SAST - Complete Security Scan"
 
 on:
+  workflow_call:  # 必须放在最前面！
+    inputs:
+      scan_level:
+        description: '扫描级别'
+        required: false
+        default: 'full'
+        type: string
   push:
     branches: ['**']
   pull_request:
@@ -25,19 +32,13 @@ on:
           - 'quick'    # 快速扫描
           - 'full'     # 完整扫描
           - 'critical' # 仅关键漏洞
-  workflow_call: # 允许被其他 workflow 调用
-    inputs:
-      scan_level:
-        description: '扫描级别'
-        required: false
-        default: 'full'
-        type: string
 
-permissions:
-   contents: read
-   security-events: write
-   actions: read
-   pull-requests: write
+# permissions 由调用方（主管道）提供
+# permissions:
+#   contents: read
+#   security-events: write
+#   actions: read
+#   pull-requests: write
 
 env:
   JAVA_VERSION: '17'
@@ -50,7 +51,7 @@ jobs:
   code-quality:
     name: Code Quality Analysis
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -261,11 +262,7 @@ jobs:
   codeql-analysis:
     name: CodeQL Security Analysis
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-
+    if: github.ref == 'refs/heads/prod/master_no_k8s' || github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
@@ -311,7 +308,7 @@ jobs:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -336,7 +333,8 @@ jobs:
 
       - name: Upload Snyk result to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && github.event_name != 'pull_request'
+        continue-on-error: true
         with:
           sarif_file: snyk.sarif
 

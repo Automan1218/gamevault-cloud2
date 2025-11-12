@@ -53,10 +53,11 @@ on:
           - 'full'     # 完整扫描 (~2小时)
           - 'api-only' # 仅 API 扫描
 
-permissions:
-  contents: read
-  security-events: write
-  actions: read
+# permissions 由调用方（主管道）提供
+# permissions:
+#   contents: read
+#   security-events: write
+#   actions: read
 
 env:
   # EC2 公网 IP

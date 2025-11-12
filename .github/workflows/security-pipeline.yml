@@ -26,6 +26,13 @@ on:
           - 'post-deploy'# 部署后扫描 (DAST only)
           - 'quick'      # 快速扫描 (仅关键项)
 
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: write
+  issues: write
+
 env:
   SCAN_SCOPE: ${{ github.event.inputs.scan_scope || 'full' }}
 
@@ -40,7 +47,7 @@ jobs:
       should_run_sast: ${{ steps.determine.outputs.run_sast }}
       should_run_container: ${{ steps.determine.outputs.run_container }}
       should_run_dast: ${{ steps.determine.outputs.run_dast }}
-    
+
     steps:
       - name: Determine scan scope
         id: determine
@@ -88,6 +95,11 @@ jobs:
     needs: pre-check
     if: needs.pre-check.outputs.should_run_sast == 'true'
     uses: ./.github/workflows/sast-scan.yml
+    permissions:  # 传递权限给子 workflow
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: write
     secrets: inherit
 
   # ==========================================
@@ -101,6 +113,11 @@ jobs:
       needs.pre-check.outputs.should_run_container == 'true' &&
       (needs.sast-scan.result == 'success' || needs.sast-scan.result == 'skipped')
     uses: ./.github/workflows/container-scan.yml
+    permissions:  # 传递权限给子 workflow
+      contents: read
+      security-events: write
+      actions: read
+      packages: write
     secrets: inherit
 
   # ==========================================
@@ -114,6 +131,10 @@ jobs:
       needs.pre-check.outputs.should_run_dast == 'true' &&
       (needs.container-scan.result == 'success' || needs.container-scan.result == 'skipped')
     uses: ./.github/workflows/dast-scan.yml
+    permissions:  # 传递权限给子 workflow
+      contents: read
+      security-events: write
+      actions: read
     secrets: inherit
 
   # ==========================================
