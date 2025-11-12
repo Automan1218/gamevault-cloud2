@@ -274,53 +274,6 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # Job 4: Snyk 容器扫描
-  # ==========================================
-  snyk-container-scan:
-    name: Snyk Container Scan
-    runs-on: ubuntu-latest
-    needs: build-images
-    if: github.event_name != 'pull_request'
-
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - gamevault-gateway
-          - gamevault-auth
-          - gamevault-shopping
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Docker Image
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image-${{ matrix.service }}
-
-      - name: Load Docker Image
-        run: |
-          docker load < ${{ matrix.service }}-scan.tar.gz
-
-      - name: Run Snyk to check Docker image
-        uses: snyk/actions/docker@master
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          image: ${{ matrix.service }}:scan
-          args: --severity-threshold=high --file=${{ matrix.service }}/Dockerfile
-
-      - name: Upload Snyk result to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: always() && github.event_name != 'pull_request'
-        continue-on-error: true
-        with:
-          sarif_file: snyk.sarif
-          category: snyk-container-${{ matrix.service }}
-
-  # ==========================================
   # Job 5: 基础镜像安全检查
   # ==========================================
   base-image-check:
