@@ -31,6 +31,20 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
+      - name: Build Common Module
+        run: |
+          echo "🔨 Building gamevault-common..."
+          if [ -d "gamevault-common" ]; then
+            cd gamevault-common
+            mvn clean install -DskipTests -B
+            cd ..
+          fi
+
+
+      - name: Compile Project
+        run: |
+          echo "🔨 Compiling all modules..."
+          mvn clean compile -DskipTests -B
       - name: Install dependencies
         run: mvn dependency:go-offline -B
 
@@ -53,6 +67,11 @@ jobs:
           echo "Running PMD..."
           mvn pmd:pmd || true
         continue-on-error: true
+
+      - name: Check PMD Results
+        run: |
+          echo "Checking for PMD reports..."
+          find . -name "pmd.xml" -type f || echo "No PMD reports found"
 
       - name: Generate Lint Summary
         run: |
@@ -81,8 +100,9 @@ jobs:
         with:
           name: checkstyle-report
           path: |
-            target/checkstyle-result.xml
-            target/site/checkstyle.html
+            **/target/checkstyle-result.xml
+            **/target/site/checkstyle.html
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload SpotBugs HTML Report
@@ -90,7 +110,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: spotbugs-html-report
-          path: target/spotbugs-report.html
+          path: |
+            **/target/spotbugsXml.xml
+            **/target/spotbugs.html
           retention-days: 7
 
       - name: Upload PMD Report
@@ -99,6 +121,6 @@ jobs:
         with:
           name: pmd-report
           path: |
-            target/pmd.xml
-            target/site/pmd.html
+            **/target/pmd.xml
+            **/target/site/pmd.html
           retention-days: 30
