@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+
+<!--
+    Checkstyle 抑制规则
+    用于忽略某些文件或目录的检查
+-->
+<suppressions>
+    <!-- 忽略 target 目录（编译输出） -->
+    <suppress files="target[\\/].*" checks=".*"/>
+
+    <!-- 忽略生成的代码 -->
+    <suppress files=".*[\\/]generated[\\/].*" checks=".*"/>
+    <suppress files=".*[\\/]generated-sources[\\/].*" checks=".*"/>
+
+    <!-- 忽略测试资源文件 -->
+    <suppress files=".*[\\/]test[\\/]resources[\\/].*" checks=".*"/>
+
+    <!-- 忽略配置类中的某些检查 -->
+    <suppress files=".*Config\.java" checks="HideUtilityClassConstructor"/>
+
+    <!-- 忽略实体类中的某些检查 -->
+    <suppress files=".*[\\/]entity[\\/].*\.java" checks="MissingJavadocMethod"/>
+    <suppress files=".*[\\/]model[\\/].*\.java" checks="MissingJavadocMethod"/>
+    <suppress files=".*[\\/]dto[\\/].*\.java" checks="MissingJavadocMethod"/>
+    <suppress files=".*[\\/]vo[\\/].*\.java" checks="MissingJavadocMethod"/>
+
+    <!-- 忽略 Mapper 接口 -->
+    <suppress files=".*Mapper\.java" checks=".*"/>
+
+    <!-- 忽略 Application 启动类 -->
+    <suppress files=".*Application\.java" checks="HideUtilityClassConstructor"/>
+
+</suppressions>

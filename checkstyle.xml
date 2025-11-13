@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+        "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+        "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+    简化的 Checkstyle 配置
+    只检查最基本的代码规范，不会导致构建失败
+-->
+<module name="Checker">
+    <!-- 设置文件编码 -->
+    <property name="charset" value="UTF-8"/>
+
+    <!-- 设置严重级别为 warning，不会导致构建失败 -->
+    <property name="severity" value="warning"/>
+
+    <!-- 忽略生成的代码 -->
+    <module name="BeforeExecutionExclusionFileFilter">
+        <property name="fileNamePattern" value="module\-info\.java$"/>
+    </module>
+
+    <!-- 文件级别检查 -->
+    <module name="FileTabCharacter">
+        <property name="eachLine" value="false"/>
+        <property name="severity" value="warning"/>
+    </module>
+
+    <!-- TreeWalker 模块 - 检查 Java 源文件 -->
+    <module name="TreeWalker">
+
+        <!-- 1. 命名规范 - 只检查基本的命名 -->
+        <module name="TypeName">
+            <property name="severity" value="warning"/>
+            <message key="name.invalidPattern"
+                     value="类名 ''{0}'' 必须符合驼峰命名规则 (例如: MyClass)"/>
+        </module>
+
+        <module name="MethodName">
+            <property name="severity" value="warning"/>
+            <message key="name.invalidPattern"
+                     value="方法名 ''{0}'' 必须符合驼峰命名规则 (例如: myMethod)"/>
+        </module>
+
+        <module name="ConstantName">
+            <property name="severity" value="warning"/>
+            <message key="name.invalidPattern"
+                     value="常量名 ''{0}'' 必须使用大写字母和下划线 (例如: MAX_VALUE)"/>
+        </module>
+
+        <!-- 2. 代码格式 - 基本的缩进和空格 -->
+        <module name="Indentation">
+            <property name="basicOffset" value="4"/>
+            <property name="caseIndent" value="4"/>
+            <property name="throwsIndent" value="8"/>
+            <property name="severity" value="info"/>
+        </module>
+
+        <module name="WhitespaceAfter">
+            <property name="tokens" value="COMMA, SEMI"/>
+            <property name="severity" value="info"/>
+        </module>
+
+        <module name="WhitespaceAround">
+            <property name="tokens" value="ASSIGN, EQUAL, NOT_EQUAL"/>
+            <property name="severity" value="info"/>
+        </module>
+
+        <!-- 3. 代码复杂度 - 防止过度复杂的方法 -->
+        <module name="CyclomaticComplexity">
+            <property name="max" value="20"/>
+            <property name="severity" value="warning"/>
+            <message key="cyclomaticComplexity"
+                     value="方法的复杂度为 {0,number,integer} (允许的最大值是 {1,number,integer})"/>
+        </module>
+
+        <!-- 4. 导入规范 -->
+        <module name="AvoidStarImport">
+            <property name="severity" value="warning"/>
+            <message key="import.avoidStar"
+                     value="避免使用 * 号导入，请明确指定导入的类"/>
+        </module>
+
+        <module name="UnusedImports">
+            <property name="severity" value="info"/>
+        </module>
+
+        <module name="RedundantImport">
+            <property name="severity" value="info"/>
+        </module>
+
+        <!-- 5. 代码块规范 -->
+        <module name="NeedBraces">
+            <property name="severity" value="warning"/>
+            <property name="allowSingleLineStatement" value="true"/>
+            <message key="needBraces"
+                     value="''{0}'' 语句必须使用花括号"/>
+        </module>
+
+        <module name="LeftCurly">
+            <property name="severity" value="info"/>
+        </module>
+
+        <module name="RightCurly">
+            <property name="severity" value="info"/>
+        </module>
+
+        <!-- 6. 注释和文档 -->
+        <module name="MissingJavadocMethod">
+            <property name="severity" value="ignore"/>
+            <property name="scope" value="public"/>
+        </module>
+
+        <!-- 7. 其他常见问题 -->
+        <module name="EmptyStatement">
+            <property name="severity" value="warning"/>
+            <message key="empty.statement"
+                     value="空语句 (单独的分号)"/>
+        </module>
+
+        <module name="SimplifyBooleanExpression">
+            <property name="severity" value="info"/>
+        </module>
+
+        <module name="SimplifyBooleanReturn">
+            <property name="severity" value="info"/>
+        </module>
+
+    </module>
+
+    <!-- 忽略特定的文件或目录 -->
+    <module name="SuppressionFilter">
+        <property name="file" value="${config_loc}/checkstyle-suppressions.xml"
+                  default="checkstyle-suppressions.xml"/>
+        <property name="optional" value="true"/>
+    </module>
+
+</module>
