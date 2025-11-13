@@ -1,0 +1,104 @@
+# ==========================================
+# Linting Workflow
+# Based on Workshop 8 - Code Quality Analysis
+# ==========================================
+
+name: "Lint - Code Quality Check"
+
+on:
+  push:
+    branches: [prod/master_no_k8s, main]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    name: Code Quality Analysis
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Install dependencies
+        run: mvn dependency:go-offline -B
+
+#      - name: Run Checkstyle (ignore violations)
+#        run: |
+#          echo "Running Checkstyle (ignore violations)..."
+#          mvn checkstyle:checkstyle \
+#            -Dcheckstyle.config.location=google_checks.xml \
+#            -Dcheckstyle.failOnViolation=false
+#        continue-on-error: true
+
+      - name: Run SpotBugs
+        run: |
+          echo "Running SpotBugs..."
+          mvn compile spotbugs:spotbugs || true
+        continue-on-error: true
+
+      - name: Run PMD
+        run: |
+          echo "Running PMD..."
+          mvn pmd:pmd || true
+        continue-on-error: true
+
+      - name: Generate Lint Summary
+        run: |
+          echo "## Lint Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "target/checkstyle-result.xml" ]; then
+            VIOLATIONS=$(grep -c "<error" target/checkstyle-result.xml || echo "0")
+            echo "- **Checkstyle**: $VIOLATIONS violations found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "target/spotbugs-report.html" ]; then
+            BUGS=$(grep -c "Bug" target/spotbugs-report.html || echo "0")
+            echo "- **SpotBugs**: $BUGS potential bugs found" >> $GITHUB_STEP_SUMMARY
+            echo "SpotBugs report: [artifact](target/spotbugs-report.html)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "target/pmd.xml" ]; then
+            PMD_ISSUES=$(grep -c "<violation" target/pmd.xml || echo "0")
+            echo "- **PMD**: $PMD_ISSUES code quality issues found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Checkstyle Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkstyle-report
+          path: |
+            target/checkstyle-result.xml
+            target/site/checkstyle.html
+          retention-days: 30
+
+      - name: Upload SpotBugs HTML Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotbugs-html-report
+          path: target/spotbugs-report.html
+          retention-days: 7
+
+      - name: Upload PMD Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pmd-report
+          path: |
+            target/pmd.xml
+            target/site/pmd.html
+          retention-days: 30

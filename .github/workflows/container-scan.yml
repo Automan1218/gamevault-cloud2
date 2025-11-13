@@ -1,241 +1,48 @@
 # ==========================================
-# Enhanced Container Security Scan Workflow
-# Docker 镜像和容器安全扫描
-# 适用于 GameVault 微服务架构
+# Container Security Scan Workflow
+# Based on Workshop 7 - Docker Scout
 # ==========================================
 
 name: "Container Scan - Docker Security"
 
 on:
-  workflow_call:  # 必须放在最前面！
-    inputs:
-      scan_all_services:
-        description: '是否扫描所有服务'
-        required: false
-        default: true
-        type: boolean
   push:
-    branches: ['**']
-  pull_request:
-    branches: [prod/master_no_k8s, dev/master, main]
+    branches: [prod/master_no_k8s, main]
   schedule:
-    # 每周一凌晨 4 点自动扫描
-    - cron: '0 4 * * 1'
-  workflow_dispatch:
-    inputs:
-      scan_all_services:
-        description: '是否扫描所有服务'
-        required: true
-        default: 'true'
-        type: boolean
+    # Run weekly on Monday at 02:00 UTC
+    - cron: '0 2 * * 1'
 
-# permissions 由调用方（主管道）提供
-# permissions:
-#   contents: read
-#   security-events: write
-#   packages: write
-#   actions: read
+permissions:
+  contents: read
+  security-events: write
 
 env:
-  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-  IMAGE_TAG: latest
+  IMAGE_NAME: gamevault-backend
 
 jobs:
-  # ==========================================
-  # Job 1: 构建 Docker 镜像
-  # ==========================================
-  build-images:
-    name: Build Docker Images for Scanning
+  docker-scout-scan:
     runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - gamevault-gateway
-          - gamevault-auth
-          - gamevault-shopping
-          - gamevault-forum
-          - gamevault-developer
-          - gamevault-social
+    name: Docker Scout Security Scan
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
-
-      - name: Build JAR
-        run: |
-          echo "🔨 Building ${{ matrix.service }}..."
-          # 先构建 common 模块
-          if [ -d "gamevault-common" ]; then
-            cd gamevault-common
-            mvn clean install -DskipTests -B
-            cd ..
-          fi
-          # 再构建整个项目
-          mvn clean package -DskipTests -B
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker Image
+      - name: Build Docker Image for Scanning
         uses: docker/build-push-action@v5
         with:
-          context: ./${{ matrix.service }}
-          file: ./${{ matrix.service }}/Dockerfile
+          context: .
+          file: ./Dockerfile
           load: true
-          tags: ${{ matrix.service }}:scan
+          tags: ${{ env.IMAGE_NAME }}:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Save Docker Image
-        run: |
-          docker save ${{ matrix.service }}:scan | gzip > ${{ matrix.service }}-scan.tar.gz
-
-      - name: Upload Docker Image Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-${{ matrix.service }}
-          path: ${{ matrix.service }}-scan.tar.gz
-          retention-days: 1
-
-  # ==========================================
-  # Job 2: Trivy 容器扫描
-  # ==========================================
-  trivy-scan:
-    name: Trivy Container Scan
-    runs-on: ubuntu-latest
-    needs: build-images
-
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - gamevault-gateway
-          - gamevault-auth
-          - gamevault-shopping
-          - gamevault-forum
-          - gamevault-developer
-          - gamevault-social
-
-    steps:
-      - name: Download Docker Image
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image-${{ matrix.service }}
-
-      - name: Load Docker Image
-        run: |
-          docker load < ${{ matrix.service }}-scan.tar.gz
-
-      - name: Run Trivy vulnerability scanner (SARIF)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ matrix.service }}:scan
-          format: 'sarif'
-          output: 'trivy-${{ matrix.service }}.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-          scanners: 'vuln,config,secret'
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always() && github.event_name != 'pull_request'  # 仅在非 PR 时上传
-        continue-on-error: true  # 如果失败不影响整体流程
-        with:
-          sarif_file: 'trivy-${{ matrix.service }}.sarif'
-          category: trivy-${{ matrix.service }}
-
-      - name: Run Trivy vulnerability scanner (JSON)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ matrix.service }}:scan
-          format: 'json'
-          output: 'trivy-${{ matrix.service }}.json'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
-          scanners: 'vuln,config,secret'
-
-      - name: Run Trivy vulnerability scanner (Table)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ matrix.service }}:scan
-          format: 'table'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-
-      - name: Parse Trivy Results
-        if: always()
-        run: |
-          echo "## 🐳 Trivy Scan Results - ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -f "trivy-${{ matrix.service }}.json" ]; then
-            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-${{ matrix.service }}.json)
-            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' trivy-${{ matrix.service }}.json)
-            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' trivy-${{ matrix.service }}.json)
-            LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' trivy-${{ matrix.service }}.json)
-          
-            echo "### 漏洞统计:" >> $GITHUB_STEP_SUMMARY
-            echo "| 严重程度 | 数量 |" >> $GITHUB_STEP_SUMMARY
-            echo "|---------|------|" >> $GITHUB_STEP_SUMMARY
-            echo "| 🔴 Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
-            echo "| 🟠 High | $HIGH |" >> $GITHUB_STEP_SUMMARY
-            echo "| 🟡 Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
-            echo "| 🟢 Low | $LOW |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          
-            if [ "$CRITICAL" -gt 0 ]; then
-              echo "⚠️ **发现严重漏洞!**" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
-
-      - name: Upload Trivy Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report-${{ matrix.service }}
-          path: |
-            trivy-${{ matrix.service }}.sarif
-            trivy-${{ matrix.service }}.json
-          retention-days: 30
-
-  # ==========================================
-  # Job 3: Docker Scout 扫描
-  # ==========================================
-  docker-scout-scan:
-    name: Docker Scout Security Scan
-    runs-on: ubuntu-latest
-    needs: build-images
-    if: github.event_name != 'pull_request'
-
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - gamevault-gateway
-          - gamevault-auth
-          - gamevault-shopping
-          - gamevault-forum
-          - gamevault-developer
-          - gamevault-social
-
-    steps:
-      - name: Download Docker Image
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image-${{ matrix.service }}
-
-      - name: Load Docker Image
-        run: |
-          docker load < ${{ matrix.service }}-scan.tar.gz
-
-      - name: Login to Docker Hub
+      - name: Login to Docker Hub (for Scout)
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -245,7 +52,7 @@ jobs:
         uses: docker/scout-action@v1
         with:
           command: cves
-          image: ${{ matrix.service }}:scan
+          image: ${{ env.IMAGE_NAME }}:scan
           only-severities: critical,high
           exit-code: false
           summary: true
@@ -254,165 +61,73 @@ jobs:
         uses: docker/scout-action@v1
         with:
           command: recommendations
-          image: ${{ matrix.service }}:scan
+          image: ${{ env.IMAGE_NAME }}:scan
           exit-code: false
 
-      - name: Docker Scout - SBOM
+      - name: Docker Scout - Compare to Latest
+        if: github.event_name == 'pull_request'
         uses: docker/scout-action@v1
         with:
-          command: sbom
-          image: ${{ matrix.service }}:scan
-          output: scout-sbom-${{ matrix.service }}.json
-          format: json
+          command: compare
+          image: ${{ env.IMAGE_NAME }}:scan
+          to: ${{ env.IMAGE_NAME }}:latest
+          exit-code: false
 
-      - name: Upload Scout Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scout-report-${{ matrix.service }}
-          path: scout-sbom-${{ matrix.service }}.json
-          retention-days: 30
-
-  # ==========================================
-  # Job 5: 基础镜像安全检查
-  # ==========================================
-  base-image-check:
-    name: Base Image Security Check
+  trivy-scan:
     runs-on: ubuntu-latest
+    name: Trivy Container Scan
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check base image versions
+      - name: Build Docker Image
         run: |
-          echo "## 📦 Base Image Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | Base Image | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          
-          SERVICES=(
-            "gamevault-gateway"
-            "gamevault-auth"
-            "gamevault-shopping"
-            "gamevault-forum"
-            "gamevault-developer"
-            "gamevault-social"
-          )
-          
-          for service in "${SERVICES[@]}"; do
-            if [ -f "$service/Dockerfile" ]; then
-              BASE_IMAGE=$(grep "^FROM" "$service/Dockerfile" | head -n1 | awk '{print $2}')
-              echo "| $service | $BASE_IMAGE | ✅ |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
+          docker build -t ${{ env.IMAGE_NAME }}:scan .
 
-  # ==========================================
-  # Job 6: Dockerfile Lint 检查（可选）
-  # ==========================================
-  dockerfile-lint:
-    name: Dockerfile Lint Check
-    runs-on: ubuntu-latest
-    if: false  # 暂时禁用，需要时改为 true
-
-    strategy:
-      matrix:
-        service:
-          - gamevault-gateway
-          - gamevault-auth
-          - gamevault-shopping
-          - gamevault-forum
-          - gamevault-developer
-          - gamevault-social
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Hadolint
-        uses: hadolint/hadolint-action@v3.1.0
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
         with:
-          dockerfile: ./${{ matrix.service }}/Dockerfile
-          failure-threshold: error  # 只有 error 级别才失败，warning 不影响
-          format: sarif
-          output-file: hadolint-${{ matrix.service }}.sarif
-        continue-on-error: true  # 即使失败也继续
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
 
-      - name: Upload Hadolint results
+      - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
-        if: always() && github.event_name != 'pull_request'
-        continue-on-error: true
+        if: always()
         with:
-          sarif_file: hadolint-${{ matrix.service }}.sarif
-          category: hadolint-${{ matrix.service }}
+          sarif_file: 'trivy-results.sarif'
 
-  # ==========================================
-  # Job 7: 容器扫描汇总报告
-  # ==========================================
-  container-scan-summary:
-    name: Container Scan Summary
+      - name: Run Trivy - Table Output
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Generate Security Summary
+        if: always()
+        run: |
+          echo "## Container Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Trivy Scan Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: ${{ env.IMAGE_NAME }}:scan" >> $GITHUB_STEP_SUMMARY
+          echo "- Scan Date: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the Security tab for detailed results" >> $GITHUB_STEP_SUMMARY
+
+  snyk-scan:
     runs-on: ubuntu-latest
-    needs: [trivy-scan, docker-scout-scan]  # 移除 dockerfile-lint
-    if: always()
+    name: Snyk Container Scan
+    if: github.event_name != 'pull_request'
 
     steps:
-      - name: Download all scan reports
-        uses: actions/download-artifact@v4
-        with:
-          path: scan-reports
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Generate Summary Report
+      - name: Build Docker Image
         run: |
-          echo "# 🐳 Container Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Scan Date:** $(date -u)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## 扫描完成情况" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| 扫描项目 | 状态 |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Trivy Scan | ${{ needs.trivy-scan.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker Scout | ${{ needs.docker-scout-scan.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # 统计所有服务的漏洞总数
-          TOTAL_CRITICAL=0
-          TOTAL_HIGH=0
-          TOTAL_MEDIUM=0
-          
-          for json_file in scan-reports/trivy-report-*/trivy-*.json; do
-            if [ -f "$json_file" ]; then
-              CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$json_file" || echo "0")
-              HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$json_file" || echo "0")
-              MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$json_file" || echo "0")
-          
-              TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRITICAL))
-              TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
-              TOTAL_MEDIUM=$((TOTAL_MEDIUM + MEDIUM))
-            fi
-          done
-          
-          echo "## 🔍 Overall Vulnerability Statistics" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Severity | Total Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔴 Critical | $TOTAL_CRITICAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟠 High | $TOTAL_HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟡 Medium | $TOTAL_MEDIUM |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "$TOTAL_CRITICAL" -gt 0 ]; then
-            echo "⚠️ **发现 $TOTAL_CRITICAL 个严重漏洞，需要立即处理!**" >> $GITHUB_STEP_SUMMARY
-          elif [ "$TOTAL_HIGH" -gt 0 ]; then
-            echo "⚠️ **发现 $TOTAL_HIGH 个高危漏洞，请尽快修复。**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ **未发现严重或高危漏洞。**" >> $GITHUB_STEP_SUMMARY
-          fi
+          docker build -t ${{ env.IMAGE_NAME }}:scan .
 
-      - name: Upload Consolidated Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: container-scan-summary
-          path: scan-reports/
-          retention-days: 90
