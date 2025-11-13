@@ -127,10 +127,22 @@ jobs:
       - name: Generate Test Report
         if: always()
         run: |
-          echo "## Forum Service Test Results" >> $GITHUB_STEP_SUMMARY
-          cd gamevault-forum
-          if [ -f target/surefire-reports/TEST-*.xml ]; then
-            echo "✅ Tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "## ${{ matrix.service }} Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          cd ${{ matrix.service }}
+          
+          # 使用 find 命令
+          test_files=$(find target/surefire-reports -name "TEST-*.xml" 2>/dev/null | wc -l)
+          
+          if [ "$test_files" -gt 0 ]; then
+            echo "✅ Tests completed - Found $test_files test file(s)" >> $GITHUB_STEP_SUMMARY
+          
+            # 可选：统计测试数量
+            total_tests=$(grep -h 'tests=' target/surefire-reports/TEST-*.xml 2>/dev/null | \
+                          sed 's/.*tests="\([0-9]*\)".*/\1/' | \
+                          awk '{sum+=$1} END {print sum}')
+            echo "- Total tests run: ${total_tests:-0}" >> $GITHUB_STEP_SUMMARY
           else
             echo "⚠️  No test results found" >> $GITHUB_STEP_SUMMARY
           fi
