@@ -31,6 +31,8 @@ public class CorsGlobalFilter implements WebFilter, Ordered {
             "http://3.0.15.128:3001",
             "http://3.0.15.128:30130",
             "http://3.0.15.128:30131",
+            "http://3.0.15.128:30187",
+            "http://3.0.15.128:8080",
             "http://3.0.15.128"
     );
 
