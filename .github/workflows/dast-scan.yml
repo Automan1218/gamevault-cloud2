@@ -1,4 +1,9 @@
-# DAST - Dynamic Security Scan (Simplified)
+# .github/workflows/dast-scan.yml
+# ==========================================
+# DAST - Dynamic Application Security Testing
+# Using OWASP ZAP for GameVault Frontend
+# ==========================================
+
 name: "DAST - Dynamic Security Scan"
 
 on:
@@ -10,25 +15,217 @@ on:
         type: string
   push:
     branches: [prod/master_no_k8s, main]
+  schedule:
+    - cron: '0 3 * * 1'  # 每周一凌晨 3 点
   workflow_dispatch:
+    inputs:
+      scan_type:
+        description: '扫描类型'
+        required: false
+        default: 'baseline'
+        type: choice
+        options:
+          - baseline
+          - full
+
+env:
+  # 目标应用地址
+  ZAP_TARGET_URL: "http://3.0.15.128:3000"
+  ZAP_MAX_DURATION: "3"
 
 jobs:
+  # ==========================================
+  # Job 1: 健康检查
+  # ==========================================
   health-check:
-    name: Health Check
+    name: Application Health Check
     runs-on: ubuntu-latest
+
     steps:
-      - run: |
-          echo "🏥 Services health check"
-          echo "✅ All services healthy" >> $GITHUB_STEP_SUMMARY
+      - name: Check application availability
+        run: |
+          echo "🏥 Checking application health..."
+          echo ""
+          echo "Target: ${{ env.ZAP_TARGET_URL }}"
+          echo ""
+          
+          # 检查主页
+          echo "Testing homepage..."
+          if curl -sf "${{ env.ZAP_TARGET_URL }}/" > /dev/null 2>&1; then
+            echo "✅ Homepage accessible"
+          else
+            echo "⚠️  Homepage not responding"
+          fi
+          
+          # 检查商店页面
+          echo "Testing store page..."
+          if curl -sf "${{ env.ZAP_TARGET_URL }}/dashboard/store" > /dev/null 2>&1; then
+            echo "✅ Store page accessible"
+          else
+            echo "⚠️  Store page not responding"
+          fi
+          
+          # 检查论坛页面
+          echo "Testing forum page..."
+          if curl -sf "${{ env.ZAP_TARGET_URL }}/dashboard/forum" > /dev/null 2>&1; then
+            echo "✅ Forum page accessible"
+          else
+            echo "⚠️  Forum page not responding"
+          fi
+          
+          echo ""
+          echo "Health check completed"
         continue-on-error: true
 
+  # ==========================================
+  # Job 2: OWASP ZAP 扫描
+  # ==========================================
+  zap-scan:
+    name: OWASP ZAP Security Scan
+    runs-on: ubuntu-latest
+    needs: health-check
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x scripts/zap-scan.sh
+
+      - name: Run OWASP ZAP scan
+        env:
+          ZAP_TARGET_URL: ${{ env.ZAP_TARGET_URL }}
+          ZAP_MAX_DURATION: ${{ env.ZAP_MAX_DURATION }}
+        run: |
+          echo "🔍 Starting OWASP ZAP scan..."
+          ./scripts/zap-scan.sh
+        continue-on-error: true
+
+      - name: Parse ZAP results
+        if: always()
+        run: |
+          echo "# 🛡️ DAST Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Application:** ${{ env.ZAP_TARGET_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "zap_baseline_report.html" ]; then
+            HIGH=$(grep -o "FAIL-High" zap_baseline_report.html | wc -l || echo "0")
+            MEDIUM=$(grep -o "FAIL-Medium" zap_baseline_report.html | wc -l || echo "0")
+            LOW=$(grep -o "FAIL-Low" zap_baseline_report.html | wc -l || echo "0")
+            PASS=$(grep -o "PASS" zap_baseline_report.html | wc -l || echo "0")
+          
+            echo "## 📊 Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 🔴 High | $HIGH |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟡 Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🔵 Low | $LOW |" >> $GITHUB_STEP_SUMMARY
+            echo "| ✅ Passed | $PASS |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          
+            if [ "$HIGH" -gt 0 ]; then
+              echo "🚨 **CRITICAL: $HIGH high severity vulnerabilities detected!**" >> $GITHUB_STEP_SUMMARY
+            elif [ "$MEDIUM" -gt 0 ]; then
+              echo "⚠️ **WARNING: $MEDIUM medium severity vulnerabilities detected.**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **No critical or high vulnerabilities found.**" >> $GITHUB_STEP_SUMMARY
+            fi
+          
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## 🎯 Scanned URLs" >> $GITHUB_STEP_SUMMARY
+            echo "1. http://3.0.15.128:3000/dashboard/store" >> $GITHUB_STEP_SUMMARY
+            echo "2. http://3.0.15.128:3000/dashboard/forum" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Scan report not generated**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload ZAP reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-scan-reports
+          path: |
+            zap_baseline_report.html
+            zap-reports/
+          retention-days: 30
+
+  # ==========================================
+  # Job 3: 安全头检查
+  # ==========================================
   security-headers:
-    name: Security Headers
+    name: Security Headers Check
     runs-on: ubuntu-latest
     needs: health-check
     if: always()
+
     steps:
-      - run: |
-          echo "🔒 Security headers checked"
-          echo "✅ Headers configured" >> $GITHUB_STEP_SUMMARY
+      - name: Check security headers
+        run: |
+          echo "🔒 Checking security headers..."
+          echo ""
+          
+          URLS=(
+            "http://3.0.15.128:3000/"
+            "http://3.0.15.128:3000/dashboard/store"
+            "http://3.0.15.128:3000/dashboard/forum"
+          )
+          
+          for URL in "${URLS[@]}"; do
+            echo "Checking: $URL"
+            echo "---"
+          
+            RESPONSE=$(curl -sI "$URL" 2>/dev/null || echo "FAILED")
+          
+            if [ "$RESPONSE" = "FAILED" ]; then
+              echo "⚠️  Failed to connect"
+            else
+              # 检查常见安全头
+              echo "$RESPONSE" | grep -i "X-Frame-Options" || echo "⚠️  X-Frame-Options missing"
+              echo "$RESPONSE" | grep -i "X-Content-Type-Options" || echo "⚠️  X-Content-Type-Options missing"
+              echo "$RESPONSE" | grep -i "Strict-Transport-Security" || echo "⚠️  HSTS missing"
+              echo "$RESPONSE" | grep -i "Content-Security-Policy" || echo "⚠️  CSP missing"
+            fi
+          
+            echo ""
+          done
+          
+          echo "✅ Security headers check completed"
         continue-on-error: true
+
+      - name: Generate security headers summary
+        if: always()
+        run: |
+          echo "## 🔒 Security Headers Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Checked URLs:" >> $GITHUB_STEP_SUMMARY
+          echo "- http://3.0.15.128:3000/" >> $GITHUB_STEP_SUMMARY
+          echo "- http://3.0.15.128:3000/dashboard/store" >> $GITHUB_STEP_SUMMARY
+          echo "- http://3.0.15.128:3000/dashboard/forum" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See job logs for detailed header information" >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================
+  # Job 4: 扫描总结
+  # ==========================================
+  dast-summary:
+    name: DAST Scan Summary
+    runs-on: ubuntu-latest
+    needs: [zap-scan, security-headers]
+    if: always()
+
+    steps:
+      - name: Generate final summary
+        run: |
+          echo "# 🛡️ DAST Scan Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan completed at:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** http://3.0.15.128:3000" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ZAP Scan | ${{ needs.zap-scan.result == 'success' && '✅' || '⚠️' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Headers | ${{ needs.security-headers.result == 'success' && '✅' || '⚠️' }} |" >> $GITHUB_STEP_SUMMARY
