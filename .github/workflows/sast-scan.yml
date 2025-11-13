@@ -49,25 +49,32 @@ jobs:
         continue-on-error: true
 
   codeql-analysis:
-    name: CodeQL
+    name: CodeQL Security Analysis
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
+
       - uses: github/codeql-action/init@v3
-        continue-on-error: true
         with:
           languages: java
+          queries: security-extended
+
       - uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
-      - run: |
+
+      - name: Build project
+        run: |
           if [ -d "gamevault-common" ]; then
             cd gamevault-common && mvn clean install -DskipTests -B && cd ..
           fi
-          mvn clean compile -B -DskipTests || true
+          mvn clean compile -B -DskipTests
         continue-on-error: true
+
       - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:java"
         continue-on-error: true
