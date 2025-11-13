@@ -60,6 +60,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: 'maven'
+      - name: Install Parent POM
+        run: |
+          echo "📦 Installing parent POM..."
+          mvn clean install -N -DskipTests -B
+     
 
       - name: Build Common Module First
         run: |
@@ -68,6 +73,8 @@ jobs:
             cd gamevault-common
             mvn clean install -DskipTests -B
             cd ..
+          else
+            echo "⚠️ gamevault-common directory not found"
           fi
 
       - name: Build Service JAR
