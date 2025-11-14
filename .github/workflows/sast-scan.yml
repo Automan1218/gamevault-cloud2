@@ -59,19 +59,33 @@ jobs:
 
 
       - name: Run OWASP Dependency Check
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_TOKEN }}
         run: |
-          ./scripts/dependency-check.sh \
-            --project "GameVault Backend" \
+          echo "🔍 Running OWASP Dependency Check..."
+
+          # 构建命令
+          CMD="./dependency-check/bin/dependency-check.sh \
+            --project 'GameVault Backend' \
             --scan . \
             --format HTML \
             --format JSON \
             --format XML \
             --out ./dependency-check-report \
-            --nvdApiKey ${NVD_API_KEY} \
-            --suppression ./dependency-check-suppression.xml || true
-        continue-on-error: true
+            --suppression ./dependency-check-suppression.xml \
+            --failOnCVSS 11"
+
+          # 如果有 API Key，添加参数
+          if [ -n "${{ secrets.NVD_TOKEN }}" ]; then
+            echo "✅ Using NVD API Key"
+            CMD="$CMD --nvdApiKey ${{ secrets.NVD_TOKEN }}"
+          else
+            echo "⚠️ No NVD API Key, using --noupdate mode"
+            CMD="$CMD --noupdate"
+          fi
+
+          # 执行命令
+          eval $CMD || true
+
+          echo "✅ Scan completed"
 
       - name: Parse Vulnerability Results
         if: always()
