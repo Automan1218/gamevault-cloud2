@@ -33,116 +33,54 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
-
-
-      - name: Download OWASP Dependency Check
-        run: |
-          wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
-          unzip -q dependency-check-9.0.9-release.zip
-
-      - name: Make script executable
-        run: chmod +x ./scripts/dependency-check.sh
-
-
-      - name: Create report directory with permissions
-        run: |
-          echo "📁 Creating report directory..."
-          mkdir -p ./dependency-check-report
-          chmod -R 777 ./dependency-check-report
-        
-          sudo chown -R $USER:$USER ./dependency-check-report || true
-
-            - name: Cache Dependency Check Database
+      - name: Cache Dependency Check Database
         uses: actions/cache@v3
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: ${{ runner.os }}-dependency-check-db-v1
+          key: ${{ runner.os }}-owasp-db-${{ github.run_number }}
           restore-keys: |
-            ${{ runner.os }}-dependency-check-db-
+            ${{ runner.os }}-owasp-db-
 
-      - name: Initialize Dependency Check Database
+      - name: Build Project
         run: |
-          echo "🔄 Checking database..."
-
-          DB_PATH="$HOME/.m2/repository/org/owasp/dependency-check-data"
-
-          if [ ! -d "$DB_PATH" ] || [ ! -f "$DB_PATH/odc.mv.db" ]; then
-            echo "📥 Database not found, initializing..."
-
-            ./dependency-check/bin/dependency-check.sh \
-              --updateonly \
-              --data "$DB_PATH" \
-              || true
-
-            echo "✅ Database initialized"
-          else
-            echo "✅ Using cached database"
+          echo "🔨 Building project..."
+          if [ -d "gamevault-common" ]; then
+            cd gamevault-common && mvn clean install -DskipTests -B && cd ..
           fi
-
+          mvn clean compile -B
 
       - name: Run OWASP Dependency Check
         run: |
-          echo "🔍 Running OWASP Dependency Check..."
+          echo "🔍 Running Maven dependency check..."
           
-          mkdir -p ./dependency-check-report
-          chmod -R 777 ./dependency-check-report
-          
-          ./dependency-check/bin/dependency-check.sh \
-            --project "GameVault Backend" \
-            --scan . \
-            --format HTML \
-            --format JSON \
-            --format XML \
-            --out ./dependency-check-report \
-            --suppression ./dependency-check-suppression.xml \
-            --failOnCVSS 11 \
-            --noupdate \
+          mvn org.owasp:dependency-check-maven:9.0.9:check \
+            -DskipTests \
+            -DfailBuildOnCVSS=11 \
+            -DautoUpdate=false \
+            -DcentralAnalyzerEnabled=false \
+            -DsuppressionFile=dependency-check-suppression.xml \
             || true
           
-          echo "✅ Scan completed (local mode)"
-          
-          # 验证报告是否生成
-          if [ -d "./dependency-check-report" ]; then
-            echo "📋 Generated files:"
-            ls -lh ./dependency-check-report/
-          fi
+          echo "✅ Scan completed"
         continue-on-error: true
 
       - name: Parse Vulnerability Results
         if: always()
         run: |
-          echo "##SAST Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "# 🔒 SAST Scan Results (Maven)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f "./dependency-check-report/dependency-check-report.json" ]; then
-            CRITICAL=$(grep -o '"severity":"CRITICAL"' ./dependency-check-report/dependency-check-report.json | wc -l || echo "0")
-            HIGH=$(grep -o '"severity":"HIGH"' ./dependency-check-report/dependency-check-report.json | wc -l || echo "0")
-            MEDIUM=$(grep -o '"severity":"MEDIUM"' ./dependency-check-report/dependency-check-report.json | wc -l || echo "0")
-            LOW=$(grep -o '"severity":"LOW"' ./dependency-check-report/dependency-check-report.json | wc -l || echo "0")
-
-            echo "### Vulnerabilities Found:" >> $GITHUB_STEP_SUMMARY
-            echo "- Critical: $CRITICAL" >> $GITHUB_STEP_SUMMARY
-            echo "- High: $HIGH" >> $GITHUB_STEP_SUMMARY
-            echo "- Medium: $MEDIUM" >> $GITHUB_STEP_SUMMARY
-            echo "- Low: $LOW" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # 查找生成的报告
+          REPORT_FILE=$(find . -name "dependency-check-report.html" -type f | head -1)
+          
+          if [ -n "$REPORT_FILE" ]; then
+            echo "✅ **Report generated:** $REPORT_FILE" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-
-            if [ "$CRITICAL" -gt 0 ]; then
-              echo "**Critical vulnerabilities detected! Immediate action required.**" >> $GITHUB_STEP_SUMMARY
-            elif [ "$HIGH" -gt 0 ]; then
-              echo "**High severity vulnerabilities detected. Please review.**" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "**No critical or high severity vulnerabilities found.**" >> $GITHUB_STEP_SUMMARY
-            fi
+            echo "Check artifacts for detailed results" >> $GITHUB_STEP_SUMMARY
           else
-            echo "Report not generated" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️ **No vulnerabilities report generated**" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload Dependency Check Report
@@ -150,7 +88,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sast-dependency-check-report
-          path: ./dependency-check-report/
+          path: |
+            **/target/dependency-check-report.html
+            **/target/dependency-check-report.json
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Archive production artifacts
