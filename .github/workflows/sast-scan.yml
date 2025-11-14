@@ -61,31 +61,30 @@ jobs:
       - name: Run OWASP Dependency Check
         run: |
           echo "🔍 Running OWASP Dependency Check..."
-
-          CMD="./dependency-check/bin/dependency-check.sh \
-            --project 'GameVault Backend' \
+          
+          mkdir -p ./dependency-check-report
+          chmod -R 777 ./dependency-check-report
+          
+          # 使用本地模式，完全不依赖 NVD API
+          ./dependency-check/bin/dependency-check.sh \
+            --project "GameVault Backend" \
             --scan . \
             --format HTML \
             --format JSON \
             --format XML \
             --out ./dependency-check-report \
             --suppression ./dependency-check-suppression.xml \
-            --failOnCVSS 11"
-
-          # 如果有 API Key，添加参数和延迟
-          if [ -n "${{ secrets.NVD_TOKEN }}" ]; then
-            echo "✅ Using NVD API Key with delay"
-            CMD="$CMD --nvdApiKey ${{ secrets.NVD_TOKEN }} --nvdApiDelay 6000"
-            # 延迟从默认 3500ms 增加到 6000ms
-          else
-            echo "⚠️ No NVD API Key, using --noupdate mode"
-            CMD="$CMD --noupdate"
+            --failOnCVSS 11 \
+            --noupdate \
+            || true
+          
+          echo "✅ Scan completed (local mode)"
+          
+          # 验证报告是否生成
+          if [ -d "./dependency-check-report" ]; then
+            echo "📋 Generated files:"
+            ls -lh ./dependency-check-report/
           fi
-
-          # 执行命令
-          eval $CMD || true
-
-          echo "✅ Scan completed"
         continue-on-error: true
 
       - name: Parse Vulnerability Results
