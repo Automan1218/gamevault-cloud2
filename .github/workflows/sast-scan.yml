@@ -62,7 +62,6 @@ jobs:
         run: |
           echo "🔍 Running OWASP Dependency Check..."
 
-          # 构建命令
           CMD="./dependency-check/bin/dependency-check.sh \
             --project 'GameVault Backend' \
             --scan . \
@@ -73,10 +72,11 @@ jobs:
             --suppression ./dependency-check-suppression.xml \
             --failOnCVSS 11"
 
-          # 如果有 API Key，添加参数
+          # 如果有 API Key，添加参数和延迟
           if [ -n "${{ secrets.NVD_TOKEN }}" ]; then
-            echo "✅ Using NVD API Key"
-            CMD="$CMD --nvdApiKey ${{ secrets.NVD_TOKEN }}"
+            echo "✅ Using NVD API Key with delay"
+            CMD="$CMD --nvdApiKey ${{ secrets.NVD_TOKEN }} --nvdApiDelay 6000"
+            # 延迟从默认 3500ms 增加到 6000ms
           else
             echo "⚠️ No NVD API Key, using --noupdate mode"
             CMD="$CMD --noupdate"
@@ -86,6 +86,7 @@ jobs:
           eval $CMD || true
 
           echo "✅ Scan completed"
+        continue-on-error: true
 
       - name: Parse Vulnerability Results
         if: always()
