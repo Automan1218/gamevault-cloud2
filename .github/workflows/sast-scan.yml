@@ -86,7 +86,7 @@ jobs:
             --format JSON \
             --format XML \
             --out ./dependency-check-report \
-            --nvdApiKey ${NVD_TOKEN:-""} \
+            --nvdApiKey ${NVD_API_KEY} \
             --suppression ./dependency-check-suppression.xml || true
         continue-on-error: true
 
