@@ -62,6 +62,19 @@ jobs:
           wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
           unzip -q dependency-check-9.0.9-release.zip
 
+      - name: Make script executable
+        run: chmod +x ./scripts/dependency-check.sh
+
+
+      - name: Create report directory with permissions
+        run: |
+          echo "📁 Creating report directory..."
+          mkdir -p ./dependency-check-report
+          chmod -R 777 ./dependency-check-report
+        
+          sudo chown -R $USER:$USER ./dependency-check-report || true
+
+
       - name: Run OWASP Dependency Check
         env:
           NVD_API_KEY: ${{ secrets.NVD_TOKEN }}
