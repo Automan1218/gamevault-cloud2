@@ -40,6 +40,8 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
+
+
       - name: Download OWASP Dependency Check
         run: |
           wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
@@ -57,6 +59,33 @@ jobs:
         
           sudo chown -R $USER:$USER ./dependency-check-report || true
 
+            - name: Cache Dependency Check Database
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: ${{ runner.os }}-dependency-check-db-v1
+          restore-keys: |
+            ${{ runner.os }}-dependency-check-db-
+
+      - name: Initialize Dependency Check Database
+        run: |
+          echo "🔄 Checking database..."
+
+          DB_PATH="$HOME/.m2/repository/org/owasp/dependency-check-data"
+
+          if [ ! -d "$DB_PATH" ] || [ ! -f "$DB_PATH/odc.mv.db" ]; then
+            echo "📥 Database not found, initializing..."
+
+            ./dependency-check/bin/dependency-check.sh \
+              --updateonly \
+              --data "$DB_PATH" \
+              || true
+
+            echo "✅ Database initialized"
+          else
+            echo "✅ Using cached database"
+          fi
+
 
       - name: Run OWASP Dependency Check
         run: |
@@ -65,7 +94,6 @@ jobs:
           mkdir -p ./dependency-check-report
           chmod -R 777 ./dependency-check-report
           
-          # 使用本地模式，完全不依赖 NVD API
           ./dependency-check/bin/dependency-check.sh \
             --project "GameVault Backend" \
             --scan . \
