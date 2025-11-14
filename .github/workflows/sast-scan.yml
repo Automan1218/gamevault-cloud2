@@ -22,9 +22,9 @@ env:
   JAVA_VERSION: '17'
 
 jobs:
-  dependency-check:
+  dependency-analysis:
     runs-on: ubuntu-latest
-    name: Dependency Security Check
+    name: Dependency Analysis
 
     steps:
       - uses: actions/checkout@v4
@@ -35,44 +35,6 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      # 缓存 OWASP 数据库
-      - name: Cache OWASP Database
-        id: cache-owasp-db
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.m2/repository/org/owasp/dependency-check-data
-            ~/.m2/repository/org/owasp/dependency-check-utils
-          key: ${{ runner.os }}-owasp-db-v2-${{ github.run_number }}
-          restore-keys: |
-            ${{ runner.os }}-owasp-db-v2-
-            ${{ runner.os }}-owasp-db-
-
-      # 首次运行：初始化数据库
-      - name: Initialize OWASP Database (First Run)
-        if: steps.cache-owasp-db.outputs.cache-hit != 'true'
-        run: |
-          echo "📥 First run detected - initializing database..."
-          echo "This may take 5-10 minutes..."
-          
-          # 使用 update-only 初始化数据库
-          mvn org.owasp:dependency-check-maven:9.0.9:update-only \
-            -B \
-            -Dformat=ALL \
-            2>&1 | tee update.log
-          
-          # 检查是否成功
-          if [ -d "$HOME/.m2/repository/org/owasp/dependency-check-data" ]; then
-            echo "✅ Database initialized successfully"
-            ls -la "$HOME/.m2/repository/org/owasp/dependency-check-data/"
-          else
-            echo "⚠️ Database initialization may have failed"
-            cat update.log
-          fi
-        continue-on-error: true
-        timeout-minutes: 15
-
-      # 构建项目
       - name: Build Project
         run: |
           echo "🔨 Building project..."
@@ -81,82 +43,59 @@ jobs:
           fi
           mvn clean compile -B
 
-      # 运行依赖检查
-      - name: Run Dependency Check
+      - name: Generate Dependency Tree
         run: |
-          echo "🔍 Running dependency check..."
-          
-          # 检查数据库是否存在
-          DB_PATH="$HOME/.m2/repository/org/owasp/dependency-check-data"
-          
-          if [ -d "$DB_PATH" ] && [ "$(ls -A $DB_PATH 2>/dev/null)" ]; then
-            echo "✅ Using cached database"
-            AUTO_UPDATE="false"
-          else
-            echo "⚠️ Database not found, enabling auto-update"
-            AUTO_UPDATE="true"
-          fi
-          
-          echo "Running scan with autoUpdate=$AUTO_UPDATE"
-          
-          mvn org.owasp:dependency-check-maven:9.0.9:check \
-            -DskipTests \
-            -DfailBuildOnCVSS=11 \
-            -DautoUpdate=$AUTO_UPDATE \
-            -DcentralAnalyzerEnabled=false \
-            -DassemblyAnalyzerEnabled=false \
-            -DsuppressionFile=dependency-check-suppression.xml \
-            -B \
-            2>&1 | tee check.log || echo "⚠️ Check completed with warnings"
-          
-          echo "✅ Scan completed"
-        continue-on-error: true
-        timeout-minutes: 20
+          echo "📦 Generating dependency tree..."
+          mvn dependency:tree -DoutputFile=dependency-tree.txt -B
+          echo "✅ Dependency tree generated"
 
-      # 生成摘要
-      - name: Generate Summary
-        if: always()
+      - name: Check for Dependency Updates
         run: |
-          echo "# 🔒 Dependency Security Check" >> $GITHUB_STEP_SUMMARY
+          echo "🔍 Checking for dependency updates..."
+          mvn versions:display-dependency-updates -B | tee dependency-updates.txt || true
+        continue-on-error: true
+
+      - name: List All Dependencies
+        run: |
+          echo "📋 Listing all dependencies..."
+          mvn dependency:list -DoutputFile=dependency-list.txt -B
+          echo "✅ Dependencies listed"
+
+      - name: Generate Summary
+        run: |
+          echo "# 📦 Dependency Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "**Cache Hit:** ${{ steps.cache-owasp-db.outputs.cache-hit }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Analysis Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dependency tree generated" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dependencies listed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Update check performed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Key Dependencies" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # 查找报告
-          REPORTS=$(find . -name "dependency-check-report.html" -type f 2>/dev/null)
-          
-          if [ -n "$REPORTS" ]; then
-            echo "✅ Vulnerability scan completed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Reports generated:**" >> $GITHUB_STEP_SUMMARY
-            echo "$REPORTS" | while read report; do
-              echo "- \`$report\`" >> $GITHUB_STEP_SUMMARY
-            done
-          else
-            echo "ℹ️ No reports generated" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          
-            # 显示日志摘要
-            if [ -f "check.log" ]; then
-              echo "**Log excerpt:**" >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              tail -20 check.log >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-            fi
+          # 显示一些关键依赖
+          if [ -f "dependency-list.txt" ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "spring-boot|spring-security|postgresql|redis" dependency-list.txt | head -10 >> $GITHUB_STEP_SUMMARY || echo "No key dependencies found" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Note:** Full vulnerability scanning is disabled due to NVD API limitations in CI environment" >> $GITHUB_STEP_SUMMARY
+          echo "For production deployment, consider running OWASP Dependency Check locally with an API key" >> $GITHUB_STEP_SUMMARY
 
-      # 上传报告
-      - name: Upload Reports
-        if: always()
+      - name: Upload Dependency Reports
         uses: actions/upload-artifact@v4
         with:
-          name: dependency-check-reports
+          name: dependency-analysis-reports
           path: |
-            **/target/dependency-check-report.*
-            check.log
-            update.log
-          if-no-files-found: ignore
+            dependency-tree.txt
+            dependency-list.txt
+            dependency-updates.txt
+          if-no-files-found: warn
           retention-days: 30
 
   codeql-analysis:
