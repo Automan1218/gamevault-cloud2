@@ -1,4 +1,4 @@
-# SAST - Complete Security Scan (Simplified)
+# SAST - Complete Security Scan
 name: "SAST - Complete Security Scan"
 
 on:
@@ -14,47 +14,65 @@ on:
     branches: [prod/master_no_k8s, dev/master, main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   JAVA_VERSION: '17'
 
 jobs:
   dependency-check:
     runs-on: ubuntu-latest
-    name: OWASP Dependency Check
+    name: Dependency Security Check
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'maven'
 
+      # 缓存 OWASP 数据库
       - name: Cache OWASP Database
         id: cache-owasp-db
         uses: actions/cache@v3
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: ${{ runner.os }}-owasp-db-v1
+          path: |
+            ~/.m2/repository/org/owasp/dependency-check-data
+            ~/.m2/repository/org/owasp/dependency-check-utils
+          key: ${{ runner.os }}-owasp-db-v2-${{ github.run_number }}
           restore-keys: |
+            ${{ runner.os }}-owasp-db-v2-
             ${{ runner.os }}-owasp-db-
-            
-      - name: Initialize OWASP Database
+
+      # 首次运行：初始化数据库
+      - name: Initialize OWASP Database (First Run)
         if: steps.cache-owasp-db.outputs.cache-hit != 'true'
         run: |
-          echo "📥 First run - initializing database..."
+          echo "📥 First run detected - initializing database..."
+          echo "This may take 5-10 minutes..."
           
+          # 使用 update-only 初始化数据库
           mvn org.owasp:dependency-check-maven:9.0.9:update-only \
             -B \
-            || echo "⚠️ Database initialization had issues, but continuing..."
+            -Dformat=ALL \
+            2>&1 | tee update.log
           
-          echo "✅ Database initialization attempted"
+          # 检查是否成功
+          if [ -d "$HOME/.m2/repository/org/owasp/dependency-check-data" ]; then
+            echo "✅ Database initialized successfully"
+            ls -la "$HOME/.m2/repository/org/owasp/dependency-check-data/"
+          else
+            echo "⚠️ Database initialization may have failed"
+            cat update.log
+          fi
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 15
 
+      # 构建项目
       - name: Build Project
         run: |
           echo "🔨 Building project..."
@@ -63,84 +81,113 @@ jobs:
           fi
           mvn clean compile -B
 
-      - name: Run OWASP Dependency Check
+      # 运行依赖检查
+      - name: Run Dependency Check
         run: |
-          echo "🔍 Running Maven dependency check..."
+          echo "🔍 Running dependency check..."
+          
+          # 检查数据库是否存在
+          DB_PATH="$HOME/.m2/repository/org/owasp/dependency-check-data"
+          
+          if [ -d "$DB_PATH" ] && [ "$(ls -A $DB_PATH 2>/dev/null)" ]; then
+            echo "✅ Using cached database"
+            AUTO_UPDATE="false"
+          else
+            echo "⚠️ Database not found, enabling auto-update"
+            AUTO_UPDATE="true"
+          fi
+          
+          echo "Running scan with autoUpdate=$AUTO_UPDATE"
           
           mvn org.owasp:dependency-check-maven:9.0.9:check \
             -DskipTests \
             -DfailBuildOnCVSS=11 \
-            -DautoUpdate=false \
+            -DautoUpdate=$AUTO_UPDATE \
             -DcentralAnalyzerEnabled=false \
+            -DassemblyAnalyzerEnabled=false \
             -DsuppressionFile=dependency-check-suppression.xml \
-            || true
+            -B \
+            2>&1 | tee check.log || echo "⚠️ Check completed with warnings"
           
           echo "✅ Scan completed"
         continue-on-error: true
+        timeout-minutes: 20
 
-      - name: Parse Vulnerability Results
+      # 生成摘要
+      - name: Generate Summary
         if: always()
         run: |
-          echo "# 🔒 SAST Scan Results (Maven)" >> $GITHUB_STEP_SUMMARY
+          echo "# 🔒 Dependency Security Check" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Scan Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Cache Hit:** ${{ steps.cache-owasp-db.outputs.cache-hit }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # 查找生成的报告
-          REPORT_FILE=$(find . -name "dependency-check-report.html" -type f | head -1)
+          # 查找报告
+          REPORTS=$(find . -name "dependency-check-report.html" -type f 2>/dev/null)
           
-          if [ -n "$REPORT_FILE" ]; then
-            echo "✅ **Report generated:** $REPORT_FILE" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$REPORTS" ]; then
+            echo "✅ Vulnerability scan completed" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Check artifacts for detailed results" >> $GITHUB_STEP_SUMMARY
+            echo "**Reports generated:**" >> $GITHUB_STEP_SUMMARY
+            echo "$REPORTS" | while read report; do
+              echo "- \`$report\`" >> $GITHUB_STEP_SUMMARY
+            done
           else
-            echo "ℹ️ **No vulnerabilities report generated**" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️ No reports generated" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          
+            # 显示日志摘要
+            if [ -f "check.log" ]; then
+              echo "**Log excerpt:**" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              tail -20 check.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            fi
           fi
 
-      - name: Upload Dependency Check Report
+      # 上传报告
+      - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sast-dependency-check-report
+          name: dependency-check-reports
           path: |
-            **/target/dependency-check-report.html
-            **/target/dependency-check-report.json
-          if-no-files-found: warn
+            **/target/dependency-check-report.*
+            check.log
+            update.log
+          if-no-files-found: ignore
           retention-days: 30
 
-      - name: Archive production artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sast-dependency-check-report-html
-          path: |
-            ./dependency-check-report.html
-
   codeql-analysis:
-    name: CodeQL Analysis
+    name: CodeQL Security Analysis
     runs-on: ubuntu-latest
+
     permissions:
       actions: read
       contents: read
       security-events: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: java
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Build with Maven
-        run: mvn clean compile -B
+      - name: Build for CodeQL
+        run: |
+          if [ -d "gamevault-common" ]; then
+            cd gamevault-common && mvn clean install -DskipTests -B && cd ..
+          fi
+          mvn clean compile -B
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
