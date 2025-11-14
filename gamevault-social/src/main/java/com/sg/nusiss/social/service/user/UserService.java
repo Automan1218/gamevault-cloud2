@@ -143,12 +143,4 @@ public class UserService {
 
         return new ArrayList<>();
     }
-
-    /**
-     * 清除用户缓存
-     */
-    public void clearUserCache(Long userId) {
-        String cacheKey = CACHE_PREFIX + userId;
-        redisTemplate.delete(cacheKey);
-    }
 }
