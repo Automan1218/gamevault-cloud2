@@ -101,7 +101,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -140,9 +139,45 @@ jobs:
         if: always()
         run: |
           echo "## Developer Service Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
           cd gamevault-developer
-          if [ -f target/surefire-reports/TEST-*.xml ]; then
-            echo "✅ Tests completed" >> $GITHUB_STEP_SUMMARY
+          
+          # 使用 find 命令
+          test_files=$(find target/surefire-reports -name "TEST-*.xml" 2>/dev/null | wc -l)
+          
+          if [ "$test_files" -gt 0 ]; then
+            total_tests=0
+            total_failures=0
+            total_skipped=0
+          
+            for xml_file in target/surefire-reports/TEST-*.xml; do
+              if [ -f "$xml_file" ]; then
+                tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | head -1 | grep -o '[0-9]*' || echo "0")
+                failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | head -1 | grep -o '[0-9]*' || echo "0")
+                skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | head -1 | grep -o '[0-9]*' || echo "0")
+          
+                total_tests=$((total_tests + tests))
+                total_failures=$((total_failures + failures))
+                total_skipped=$((total_skipped + skipped))
+              fi
+            done
+          
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Tests | $total_tests |" >> $GITHUB_STEP_SUMMARY
+            echo "| ✅ Passed | $((total_tests - total_failures - total_skipped)) |" >> $GITHUB_STEP_SUMMARY
+            echo "| ❌ Failed | $total_failures |" >> $GITHUB_STEP_SUMMARY
+            echo "| ⏭️ Skipped | $total_skipped |" >> $GITHUB_STEP_SUMMARY
+          
+            if [ "$total_failures" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "⚠️ **Warning: $total_failures test(s) failed!**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "🎉 **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "⚠️  No test results found" >> $GITHUB_STEP_SUMMARY
           fi
@@ -153,6 +188,25 @@ jobs:
           name: developer-service-jar
           path: gamevault-developer/target/*.jar
           retention-days: 7
+
+      - name: Generate Coverage Report
+        if: always()
+        run: |
+          cd gamevault-developer
+          if [ -f "target/site/jacoco/index.html" ]; then
+            coverage=$(grep -oP 'Total.*?(\d+)%' target/site/jacoco/index.html | grep -oP '\d+' | head -1 || echo "0")
+            echo "📈 Code Coverage: ${coverage}%" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: developer-test-results
+          path: |
+            gamevault-developer/target/surefire-reports/
+            gamevault-developer/target/site/jacoco/
+          retention-days: 30
 
   build-and-deploy:
     runs-on: ubuntu-latest
