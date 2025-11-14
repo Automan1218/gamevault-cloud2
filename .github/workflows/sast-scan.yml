@@ -33,13 +33,27 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Cache Dependency Check Database
+      - name: Cache OWASP Database
+        id: cache-owasp-db
         uses: actions/cache@v3
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: ${{ runner.os }}-owasp-db-${{ github.run_number }}
+          key: ${{ runner.os }}-owasp-db-v1
           restore-keys: |
             ${{ runner.os }}-owasp-db-
+            
+      - name: Initialize OWASP Database
+        if: steps.cache-owasp-db.outputs.cache-hit != 'true'
+        run: |
+          echo "📥 First run - initializing database..."
+          
+          mvn org.owasp:dependency-check-maven:9.0.9:update-only \
+            -B \
+            || echo "⚠️ Database initialization had issues, but continuing..."
+          
+          echo "✅ Database initialization attempted"
+        continue-on-error: true
+        timeout-minutes: 10
 
       - name: Build Project
         run: |
